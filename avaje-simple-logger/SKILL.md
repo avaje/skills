@@ -12,7 +12,7 @@ Logback is unnecessary overhead.
 ## Key Principles
 
 - Drop-in SLF4J implementation — uses standard `LoggerFactory.getLogger()`
-- Configuration via `simplelogger.properties` or `application.yaml`
+- Configuration via `avaje-logger.properties` (production) and `avaje-logger-test.properties` (test)
 - No XML configuration files needed
 - GraalVM native image compatible
 - Dynamic log level changes via AWS AppConfig (optional)
@@ -35,16 +35,26 @@ Load the relevant reference guide for the current task. **Only load what you nee
 <dependency>
   <groupId>io.avaje</groupId>
   <artifactId>avaje-simple-logger</artifactId>
-  <version>${avaje-simple-logger.version}</version>
+  <version>1.5-RC1</version>
 </dependency>
 ```
 
 ### Configuration
 
 ```properties
-# src/main/resources/simplelogger.properties
-org.slf4j.simpleLogger.defaultLogLevel=info
-org.slf4j.simpleLogger.log.com.myapp=debug
+# src/main/resources/avaje-logger.properties
+logger.defaultLogLevel=warn
+logger.format=json
+log.level.com.myapp=DEBUG
+```
+
+### Test Configuration
+
+```properties
+# src/test/resources/avaje-logger-test.properties
+logger.format=plain
+logger.defaultLogLevel=INFO
+log.level.com.myapp=DEBUG
 ```
 
 ### Usage
