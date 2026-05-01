@@ -32,6 +32,7 @@ and work with any compatible harness, including
 
 ```bash
 git clone git@github.com:avaje/skills.git ~/.agents/avaje-skills
+mkdir -p ~/.agents/skills
 
 # Symlink the skills you need
 ln -sf ~/.agents/avaje-skills/avaje-nima ~/.agents/skills/avaje-nima
