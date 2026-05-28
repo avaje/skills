@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # Generates flattened reference bundles for avaje skills
-# from source guides in sibling repos (avaje-nima, avaje-inject, avaje-config, avaje-jsonb).
+# from source guides in sibling repos (avaje-nima, avaje-inject, avaje-config, avaje-jsonb, etc).
 #
 # By default, looks for repos as siblings of this directory.
 # Override with: AVAJE_DIR=/path/to/avaje ./generate-references.sh
@@ -19,9 +19,10 @@ INJECT_GUIDES="$AVAJE_DIR/avaje-inject/docs/guides"
 CONFIG_GUIDES="$AVAJE_DIR/avaje-config/docs/guides"
 JSONB_GUIDES="$AVAJE_DIR/avaje-jsonb/docs/guides"
 LOGGER_GUIDES="$AVAJE_DIR/avaje-simple-logger/docs/guides"
+METRICS_GUIDES="$AVAJE_DIR/avaje-metrics/docs/guides"
 
 # Verify repos exist
-for dir in "$NIMA_GUIDES" "$INJECT_GUIDES" "$CONFIG_GUIDES" "$JSONB_GUIDES" "$LOGGER_GUIDES"; do
+for dir in "$NIMA_GUIDES" "$INJECT_GUIDES" "$CONFIG_GUIDES" "$JSONB_GUIDES" "$LOGGER_GUIDES" "$METRICS_GUIDES"; do
   if [ ! -d "$dir" ]; then
     echo "Error: guides directory not found at $dir" >&2
     echo "Set AVAJE_DIR to the parent of your avaje repo checkouts:" >&2
@@ -218,5 +219,31 @@ generate_bundle "$LOGGER_REFS/setup.md" "Setup" \
 generate_bundle "$LOGGER_REFS/aws-appconfig.md" "AWS AppConfig" \
   "$LOGGER_GUIDES" add-aws-appconfig-to-project.md
 
+# ──────────────────────────────────────────────
+# avaje-metrics skill
+# ──────────────────────────────────────────────
+METRICS_REFS="$SCRIPT_DIR/avaje-metrics/references"
+mkdir -p "$METRICS_REFS"
+
 echo ""
-echo "Done. References written to avaje-nima/ avaje-inject/ avaje-config/ avaje-jsonb/ avaje-simple-logger/"
+echo "Generating avaje-metrics skill references ..."
+
+generate_bundle "$METRICS_REFS/setup.md" "Setup" \
+  "$METRICS_GUIDES" getting-started.md \
+  "$METRICS_GUIDES" register-jvm-metrics.md
+
+generate_bundle "$METRICS_REFS/method-timing.md" "Method Timing" \
+  "$METRICS_GUIDES" add-method-timing.md \
+  "$METRICS_GUIDES" configure-metrics-agent.md
+
+generate_bundle "$METRICS_REFS/exporters.md" "Exporters" \
+  "$METRICS_GUIDES" add-open-telemetry-export.md \
+  "$METRICS_GUIDES" add-prometheus-scrape.md \
+  "$METRICS_GUIDES" add-statsd-reporting.md \
+  "$METRICS_GUIDES" add-graphite-reporting.md
+
+generate_bundle "$METRICS_REFS/integrations.md" "Integrations" \
+  "$METRICS_GUIDES" add-ebean-metrics.md
+
+echo ""
+echo "Done. References written to avaje-nima/ avaje-inject/ avaje-config/ avaje-jsonb/ avaje-simple-logger/ avaje-metrics/"

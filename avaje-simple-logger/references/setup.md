@@ -432,6 +432,14 @@ logger.format=json
 logger.format=plain
 ```
 
+Both formats support structured context:
+
+- MDC entries
+- SLF4J 2 fluent `addKeyValue()` entries
+- OpenTelemetry trace correlation when the OpenTelemetry API is on the classpath and an active span is present
+
+For detailed examples, see [Add MDC, Fluent Key/Value, and OpenTelemetry Context to Logs](./add-structured-context-to-logs.md).
+
 #### log.level.{package}
 Set specific log levels for individual packages.
 
@@ -554,6 +562,9 @@ logger.propertyNames=logger_name=app_logger,env=application_env,timestamp=@times
 logger.propertyNames=logger_name=loggerName
 ```
 
+These settings apply to the built-in JSON fields, including trace fields such as `trace_id` and `span_id`.
+MDC keys and fluent `addKeyValue()` keys keep the exact names you provide.
+
 ### Complete Example Configuration
 
 ```properties
@@ -647,23 +658,26 @@ Expected output:
 
 ### Manual Logging Test
 
-Create a simple test to verify logging works:
+Create a simple test to verify structured logging works:
 
 ```java
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.junit.jupiter.api.Test;
 
-public class LoggingTest {
+class LoggingTest {
   private static final Logger log = LoggerFactory.getLogger(LoggingTest.class);
 
   @Test
-  void testLogging() {
-    log.trace("This is a TRACE message");
-    log.debug("This is a DEBUG message");
-    log.info("This is an INFO message");
-    log.warn("This is a WARN message");
-    log.error("This is an ERROR message");
+  void testStructuredLogging() {
+    try (var requestId = MDC.putCloseable("requestId", "req-42");
+         var tenant = MDC.putCloseable("tenant", "blue")) {
+      log.atInfo()
+        .addKeyValue("orderId", 42)
+        .addKeyValue("processed", true)
+        .log("Order processed");
+    }
   }
 }
 ```
@@ -673,7 +687,13 @@ Run this test:
 mvn test -Dtest=LoggingTest
 ```
 
-You should see all 5 log messages in the output (or up to the level configured in your properties file).
+You should see:
+
+- In JSON mode, `requestId`, `tenant`, `orderId`, and `processed` as structured fields
+- In plain mode, `requestId=req-42 tenant=blue orderId=42 processed=true` before the message
+- If an OpenTelemetry span is active, trace fields on the same log line as well
+
+For a complete walkthrough of MDC, fluent key/value logging, and OpenTelemetry trace correlation, see [Add MDC, Fluent Key/Value, and OpenTelemetry Context to Logs](./add-structured-context-to-logs.md).
 
 ### Verification Checklist
 
@@ -683,6 +703,9 @@ You should see all 5 log messages in the output (or up to the level configured i
 - [ ] Log format matches configuration (JSON or plain)
 - [ ] Log levels are being respected
 - [ ] Package-specific log levels are working
+- [ ] MDC entries appear where expected
+- [ ] Fluent `addKeyValue()` entries appear where expected
+- [ ] If an OpenTelemetry span is active, trace fields appear exactly once
 
 ---
 
@@ -797,6 +820,33 @@ LoggerContext.get().putAll(levels);
 1. In `src/main/resources/avaje-logger.properties`, set `logger.format=json`
 2. Rebuild: `mvn clean package`
 3. Re-run your application
+
+### Issue: MDC or fluent key/value fields are missing
+
+**Cause:** The contextual data was not added before the log call, or it was added with the wrong logging API.
+
+**Solution:**
+1. Add MDC values inside the scope that contains the log statement
+2. Use the SLF4J fluent API (`logger.atInfo().addKeyValue(...).log(...)`) for per-event fields
+3. Re-run the structured logging test shown above
+
+### Issue: Trace fields are missing
+
+**Cause:** There is no active OpenTelemetry span, or the OpenTelemetry API is not on the classpath.
+
+**Solution:**
+1. Verify your tracing instrumentation makes a span current during the log call
+2. Ensure `io.opentelemetry:opentelemetry-api` is on the classpath, or already provided by your tracing distribution
+3. Remember that avaje-simple-logger emits `trace_id` and `span_id` from the active span rather than copying them directly from MDC
+
+### Issue: Trace fields have unexpected names
+
+**Cause:** `logger.naming` or `logger.propertyNames` changed the built-in trace field names.
+
+**Solution:**
+1. Check `logger.naming` for underscore, camel, or legacy mode
+2. Check `logger.propertyNames` for `trace_id` / `span_id` overrides
+3. Remember that MDC keys and fluent `addKeyValue()` keys keep the exact names you supplied
 
 ### Issue: Properties file not being read
 

@@ -58,12 +58,12 @@ Your application needs IAM permissions for:
 When AppConfig is enabled:
 
 1. Application starts and initializes avaje-config
-2. avaje-aws-appconfig plugin loads initial configuration from AppConfig
-3. Configuration is merged with local properties files
+2. avaje-aws-appconfig plugin loads configuration from AppConfig
+3. avaje-simple-logger reads `log.level.*` values from that configuration
 4. Plugin polls AppConfig at regular intervals (default 45 seconds)
-5. When changes are detected, configuration is updated in-memory
-6. Log levels (and other settings) take effect immediately
-7. No application restart required
+5. When `log.level.*` changes are detected, the logger context is updated in-memory
+6. Updated log levels take effect immediately
+7. Startup logger settings such as `logger.format`, `logger.component`, `logger.environment`, `logger.naming`, and `logger.propertyNames` still come from `avaje-logger.properties` and typically require restart to change
 
 ## Step 1: Add Dependencies
 
@@ -129,9 +129,9 @@ Now create the actual configuration content.
 Click **Create Configuration** and enter:
 
 ```properties
-logger.defaultLogLevel=warn
-logger.format=json
+# Dynamic package log levels
 log.level.com.mycompany=debug
+log.level.com.mycompany.database=trace
 log.level.io.avaje=info
 ```
 
@@ -140,12 +140,10 @@ log.level.io.avaje=info
 Click **Create Configuration** and enter:
 
 ```yaml
-logger:
-  defaultLogLevel: warn
-  format: json
 log:
   level:
     com.mycompany: debug
+    com.mycompany.database: trace
     io.avaje: info
 ```
 
@@ -186,7 +184,8 @@ log.level.com.mycompany=info
 log.level.io.avaje=warn
 ```
 
-These are the local defaults. AWS AppConfig will override these if different values are configured there.
+Keep startup logger settings such as `logger.format`, `logger.component`, and `logger.environment` in this file.
+Use AWS AppConfig for dynamic `log.level.*` overrides.
 
 ### Step 3.3: Disable AppConfig for Tests
 
@@ -226,22 +225,32 @@ Then run your application with: `java -Dspring.profiles.active=local -jar myapp.
 | `aws.appconfig.pollingSeconds` | integer | `45` | Poll interval in seconds |
 | `aws.appconfig.refreshSeconds` | integer | `pollingSeconds - 1` | Max time to wait for changes |
 
-### Log Level Configuration
+### Dynamic Log Level Configuration
 
-In your AppConfig configuration, you can set:
+Use AppConfig for `log.level.*` entries. These are the settings that avaje-simple-logger applies dynamically without restart.
 
 ```properties
-# Set default log level for entire application
-logger.defaultLogLevel=warn
-
 # Set specific package log levels
 log.level.com.mycompany=debug
 log.level.com.mycompany.database=trace
 log.level.io.avaje=info
-
-# Set log format (json or plain)
-logger.format=json
 ```
+
+### Structured Context and Trace Correlation
+
+AppConfig changes log levels. It does not create contextual fields by itself.
+
+- MDC fields still come from your application code
+- Fluent `addKeyValue()` fields still come from the SLF4J 2 fluent API
+- `trace_id` and `span_id` still require an active OpenTelemetry span
+
+Recommended split:
+
+- Keep `logger.format=json` in `src/main/resources/avaje-logger.properties` for production log aggregation
+- Keep `logger.format=plain` in test or local-only configs when console readability matters more
+- Use AppConfig for temporary `log.level.*` changes during troubleshooting
+
+For concrete MDC, fluent key/value, and OpenTelemetry examples, see [Add MDC, Fluent Key/Value, and OpenTelemetry Context to Logs](./add-structured-context-to-logs.md).
 
 ## Step 4: Handle Application Startup
 
@@ -339,14 +348,13 @@ To change log levels without restarting:
 Add logging to see when configuration changes are applied:
 
 ```java
-import io.avaje.config.Config;
 import io.avaje.config.Configuration;
+import java.util.Map;
 
 // Listen for configuration changes
 Configuration.onChange((Map<String, String> changes) -> {
   for (var entry : changes.entrySet()) {
-    if (entry.getKey().startsWith("log.level.") || 
-        entry.getKey().startsWith("logger.")) {
+    if (entry.getKey().startsWith("log.level.")) {
       System.err.println("Log config changed: " + entry.getKey() + 
                          " = " + entry.getValue());
     }
@@ -390,15 +398,24 @@ Configuration.onChange((Map<String, String> changes) -> {
   ```
 - Check AWS AppConfig console for exact names
 
-### Issue: AppConfig Configuration Not Overriding Local Properties
+### Issue: Changes to `logger.format` or other startup logger settings have no effect
 
-**Cause:** AppConfig not enabled or configuration wasn't deployed.
+**Cause:** avaje-simple-logger applies `log.level.*` changes dynamically, but startup logger settings still come from `avaje-logger.properties`.
 
 **Solution:**
-- Check `aws.appconfig.enabled` is `true` in application.yaml
-- Check deployment status in AWS AppConfig console (should be "DEPLOYMENT_SUCCESS")
-- Check log levels are correctly formatted in AppConfig configuration
-- Wait for polling interval and check application logs
+- Keep `logger.format`, `logger.component`, `logger.environment`, `logger.naming`, and `logger.propertyNames` in `avaje-logger.properties`
+- Use AppConfig for `log.level.*` changes
+- Restart the application if you intentionally changed a startup logger setting
+
+### Issue: Trace fields are still missing after an AppConfig change
+
+**Cause:** AppConfig changed log levels, but there is still no active OpenTelemetry span or no OpenTelemetry API on the classpath.
+
+**Solution:**
+- Verify your tracing instrumentation makes a span current during the log call
+- Ensure `io.opentelemetry:opentelemetry-api` is on the classpath, or already provided by your tracing distribution
+- Remember that AppConfig does not create MDC entries or trace spans by itself
+- See [Add MDC, Fluent Key/Value, and OpenTelemetry Context to Logs](./add-structured-context-to-logs.md) for expected runtime behavior
 
 ### Issue: Tests Connecting to AppConfig
 
