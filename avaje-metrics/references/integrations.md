@@ -62,6 +62,86 @@ Metrics.addSupplier(new DatabaseMetricSupplier(database));
 That is the core setup. After this, Ebean metrics are part of normal avaje-metrics
 collection.
 
+### Metric naming (default)
+
+The supplier emits avaje-metrics names following the label-tag convention. Ebean's flat
+internal names like `iud.BProcessLog.insertBatch` or `dto.SensorState` are mapped to a
+small set of metric names plus tags:
+
+| Ebean prefix              | Metric name   | Tags                              |
+|---------------------------|---------------|-----------------------------------|
+| `iud.X`                   | `ebean.dml`   | `label=X`                         |
+| `dto.X`                   | `ebean.query` | `kind=dto, type=<bean>, label=X`  |
+| `orm.X`                   | `ebean.query` | `kind=orm, type=<bean>, label=X`  |
+| `sql.X`                   | `ebean.query` | `kind=sql, type=<bean>, label=X`  |
+| `txn.named.X` / `txn.X`   | `ebean.txn`   | `label=X`                         |
+| `l2.<region>.<op>`        | `ebean.l2`    | `op=<op>, region=<region>`        |
+| (anything else)           | `ebean.other` | `label=<original ebean name>`     |
+
+This shape works well for tag-aware backends such as Prometheus / OTLP, where all read
+paths roll up under `ebean_query` and can be filtered by `kind` (query category:
+orm/dto/sql) or `type` (the queried bean/entity simple name). The `type` tag is derived
+from `MetaQueryMetric.type()` and is especially useful for secondary `_lazy`/`_query`
+loads whose name reflects the parent/root query rather than the loaded entity; it is
+omitted when the bean type is unknown.
+
+### Legacy flat names (Graphite-friendly)
+
+For hierarchical reporters such as Graphite, opt in to the legacy flat-prefixed names via
+the builder:
+
+```java
+Metrics.addSupplier(
+    DatabaseMetricSupplier.builder(database)
+        .legacyNames()
+        .build());
+```
+
+Note: `GraphiteReporter.builder().database(database)` does not go through the supplier
+and is unaffected by the default naming change.
+
+### DataSourcePool metrics
+
+When the database's main and/or read-only `DataSource` is an
+`io.ebean.datasource.DataSourcePool`, the supplier additionally emits connection-pool
+metrics tagged `db=<name>, type=main|readonly`.
+
+**Default (normal) — 3 metrics per pool:**
+
+| Metric                   | Type   | Source on `PoolStatus`                                                |
+|--------------------------|--------|-----------------------------------------------------------------------|
+| `datasource.pool.size`   | gauge  | `busy() + free()`                                                     |
+| `datasource.pool.acquire`| timer  | count = `hitCount`, total = `totalAcquireMicros`, max = `maxAcquireMicros` |
+| `datasource.pool.wait`   | timer  | count = `waitCount`, total = `totalWaitMicros`                        |
+
+**Verbose — adds 3 more gauges via `.verbosePoolMetrics()`:**
+
+| Metric                     | Type   | Source on `PoolStatus`                              |
+|----------------------------|--------|-----------------------------------------------------|
+| `datasource.pool.busy`     | gauge  | `busy()` — connections currently in use             |
+| `datasource.pool.free`     | gauge  | `free()` — connections currently idle               |
+| `datasource.pool.waiting`  | gauge  | `waiting()` — threads waiting for a connection      |
+
+```java
+// verbose mode
+Metrics.addSupplier(
+    DatabaseMetricSupplier.builder(database)
+        .verbosePoolMetrics()
+        .build());
+```
+
+Disable pool metrics entirely:
+
+```java
+Metrics.addSupplier(
+    DatabaseMetricSupplier.builder(database)
+        .excludePoolMetrics()
+        .build());
+```
+
+If neither datasource is a `DataSourcePool`, no pool metrics are emitted and there is no
+runtime cost.
+
 ---
 
 ## Step 3 — Collect or export the metrics
@@ -122,6 +202,13 @@ In those cases, manual supplier registration may not be necessary.
 
 - `DatabaseMetricSupplier` maps Ebean timed metrics, query metrics, and count metrics
   into avaje-metrics `TimerStats` and `CounterStats`.
+- By default, names follow the label-tag convention (`ebean.query`, `ebean.dml`,
+  `ebean.txn`, `ebean.l2`). Use `DatabaseMetricSupplier.builder(database).legacyNames()`
+  to keep Ebean's flat names (e.g. `iud.BProcessLog.insertBatch`).
 - This module is most useful when the export path is built around registry collection.
 - For reporter modules with direct `.database(...)` support, use the simpler direct path
   unless you specifically need supplier-level control.
+- `avaje-metrics-ebean` collects database metrics. It is separate from
+  `ebean-opentelemetry`, which creates Ebean transaction spans. When using
+  `ebean-opentelemetry`, register the global OpenTelemetry instance before Ebean
+  `Database` beans are built.

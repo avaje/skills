@@ -26,7 +26,8 @@ There are three main timing styles:
 |---|---|
 | `@Timed` | declarative timing via build-time enhancement |
 | `Timer.time(...)` or `Timer.startEvent()` | explicit programmatic timing in code |
-| `Metrics.timerBuilder(...).buildTraced()` | timing plus spans when trace support is present |
+| `Metrics.timerBuilder(...).buildTraced()` | timing plus child spans when trace support is present |
+| `Metrics.timerBuilder(...).buildRootTraced()` | timing plus root-if-needed spans when trace support is present |
 
 If you do **not** want enhancement, programmatic timers are the safest and most explicit
 path. If you want `@Timed`, configure build-time enhancement first.
@@ -96,7 +97,7 @@ Add `avaje-metrics-otel-trace` when the project already has OpenTelemetry config
 </dependency>
 ```
 
-Then build a traced timer:
+Then build a child traced timer:
 
 ```java
 var tracedTimer = Metrics.timerBuilder("app.service.run")
@@ -106,8 +107,18 @@ var tracedTimer = Metrics.timerBuilder("app.service.run")
 tracedTimer.time(service::run);
 ```
 
-`buildTraced()` creates spans when trace support is available and the application has a
-global `OpenTelemetry` instance.
+`buildTraced()` creates child spans when trace support is available, the application has a
+global `OpenTelemetry` instance, and there is a current recording span.
+
+Use `buildRootTraced()` for a top-level boundary that should start a root span when no
+recording span is current:
+
+```java
+var rootTimer = Metrics.timerBuilder("app.lambda.handle")
+  .buildRootTraced();
+
+rootTimer.time(handler::handleRequest);
+```
 
 ---
 
@@ -156,7 +167,7 @@ static timer setup, so use stable low-cardinality values rather than request-spe
 You can also enable spans for enhanced methods:
 
 ```java
-@Timed(span = Timed.SpanMode.ON)
+@Timed(span = Timed.SpanMode.CHILD)
 class BillingService {
   void syncInvoices() {
   }
@@ -169,7 +180,8 @@ Important behavior:
 - `@NotTimed` excludes specific methods
 - method-level `@Timed` is useful for overrides or private methods
 - `@Timed(tags = {...})` adds custom timer tags using `key:value` values
-- `@Timed(span = Timed.SpanMode.ON)` requires trace support such as `avaje-metrics-otel-trace`
+- `@Timed(span = Timed.SpanMode.CHILD)` requires trace support such as `avaje-metrics-otel-trace`
+- `@Timed(span = Timed.SpanMode.ROOT)` starts a root span when no recording span is current
 
 ---
 
@@ -188,7 +200,8 @@ name. Success and error timing are tracked separately.
 ## Notes
 
 - Prefer programmatic timers when you want explicit behavior and no enhancement dependency.
-- Prefer `buildTraced()` when you want timing plus spans for the same code path.
+- Prefer `buildTraced()` when you want timing plus child spans for the same code path.
+- Prefer `buildRootTraced()` or `@Timed(span = Timed.SpanMode.ROOT)` for top-level Lambda-style boundaries.
 - `@Timed` is the declarative path when the application uses build-time enhancement.
 - Timers support tags and bucket ranges via `Metrics.timerBuilder(...)` and `@Timed`.
 
@@ -315,7 +328,7 @@ nameTrimPackages: com.example
 Tracing default override:
 
 ```text
-timedSpans: default-on
+timedSpans: default-child
 ```
 
 You generally do not need to set `packages`. The built-in filtering skips JDK and
@@ -384,7 +397,7 @@ Avaje HTTP controllers use `web.api` as the default metric base.
 |---|---:|---|
 | `packages` | none | Optional package allow-list. Usually omit this and use the built-in filtering. Values are split on comma, semicolon, or space. Supports `*` and `**` suffixes. |
 | `debugLevel` | `0` | Transform logging verbosity. Use `1` for basic diagnostics and higher values for more detail. |
-| `timedSpans` | `default-off` | Span defaults: `default-off`, `default-on`, or `disabled`. |
+| `timedSpans` | `default-off` | Span defaults: `default-off`, `default-child`, or `disabled`. |
 | `timedMetricNaming` | `full-name` | `full-name` or `label-tag`. |
 | `includeStaticMethods` | `false` | Include static methods when a class is enhanced by default. |
 | `enhanceSingleton` | `true` | Enhance classes annotated with `@Singleton`. |
@@ -457,16 +470,15 @@ method identity as a tag.
 Enhanced methods can create traced timers when trace support is present, such as
 `avaje-metrics-otel-trace`.
 
-`@Timed(span = Timed.SpanMode.ON)` is expected to be most useful in AWS Lambda-style
-applications where method or function boundaries are often the natural span boundary.
-For Kubernetes REST servers, request spans are typically demarcated by an HTTP filter,
-so use enhanced method spans selectively rather than enabling spans broadly for every
-controller method.
+`@Timed(span = Timed.SpanMode.CHILD)` creates child spans under an existing recording
+span, such as a request span created by an HTTP filter. `@Timed(span = Timed.SpanMode.ROOT)`
+creates a root span when there is no current recording span, which is useful for
+top-level AWS Lambda-style handler methods.
 
 Global default:
 
 ```text
-timedSpans: default-on
+timedSpans: default-child
 ```
 
 Disable all enhanced spans:
@@ -478,8 +490,12 @@ timedSpans: disabled
 Override on a class or method:
 
 ```java
-@Timed(span = Timed.SpanMode.ON)
+@Timed(span = Timed.SpanMode.CHILD)
 class BillingService {
+
+  @Timed(span = Timed.SpanMode.ROOT)
+  void lambdaHandler() {
+  }
 
   @Timed(span = Timed.SpanMode.OFF)
   void helper() {

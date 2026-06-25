@@ -15,6 +15,8 @@ like AWS AppConfig.
 - `Configuration` interface for injectable, testable config access
 - YAML and properties file support with profile-based overrides
 - Environment variable binding
+- Initial precedence: system properties > environment variables > builder values > loaded files > getter defaults
+- Runtime `setProperty()` / dynamic sources update the in-memory value for later reads
 - Runtime change listeners for dynamic configuration
 - AWS AppConfig plugin for cloud-native config management
 - GraalVM native image compatible

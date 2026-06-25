@@ -24,23 +24,26 @@ src/main/resources/
 
 ## Activating Profiles
 
-Activate a profile by setting the `config.profile` property:
+Activate a profile by setting the `config.profiles` property (note: plural):
 
 ```bash
 # Development
-java -Dconfig.profile=dev myapp.jar
+java -Dconfig.profiles=dev myapp.jar
 
 # Test
-java -Dconfig.profile=test myapp.jar
+java -Dconfig.profiles=test myapp.jar
 
 # Production
-java -Dconfig.profile=prod myapp.jar
+java -Dconfig.profiles=prod myapp.jar
+
+# Multiple profiles (comma-separated)
+java -Dconfig.profiles=prod,docker myapp.jar
 ```
 
 Or with environment variables:
 
 ```bash
-export CONFIG_PROFILE=prod
+export CONFIG_PROFILES=prod
 java myapp.jar
 ```
 
@@ -89,11 +92,38 @@ logging:
 Get the active profile:
 
 ```java
-String profile = Config.get("config.profile", "dev");
+String profile = Config.get("config.profiles", "dev");
 if (profile.equals("prod")) {
   // Production-specific behavior
 }
 ```
+
+## Test Configuration Auto-Loading vs Profile Activation
+
+These are two distinct mechanisms — do not confuse them:
+
+**`application-test.yaml` auto-loading (no activation needed):**
+`src/test/resources/application-test.yaml` is a special hardcoded filename.
+avaje-config loads it automatically whenever it is present on the classpath —
+typically during Maven/Gradle test runs. No `config.profiles=test` or
+`avaje.profiles=test` is required.
+
+```
+src/test/resources/
+└── application-test.yaml   ← loaded automatically, no profile activation needed
+```
+
+**Explicit profile activation (activation required):**
+All other profile files (`application-dev.yaml`, `application-it.yaml`, etc.)
+require explicit activation:
+
+```bash
+java -Dconfig.profiles=it myapp.jar   # loads application-it.yaml
+```
+
+> **Common mistake:** setting `-Davaje.profiles=test` in your test runner to
+> load `application-test.yaml`. This is not needed — the file is auto-loaded
+> unconditionally when present in test resources.
 
 ## Profile-Specific Beans
 
@@ -192,11 +222,70 @@ Environment variable names follow this convention:
 
 | YAML Property | Environment Variable |
 |---------------|----------------------|
-| server.port | SERVER_PORT |
-| database.host | DATABASE_HOST |
-| app.name | APP_NAME |
+| `server.port` | `SERVER_PORT` |
+| `database.host` | `DATABASE_HOST` |
+| `app.name` | `APP_NAME` |
+| `my.foo-bar` | `MY_FOOBAR` |
 
-The convention is: `UPPERCASE_WITH_UNDERSCORES`
+The translation rule is: **dots → underscores, hyphens removed, uppercase**.
+
+> **Hyphen note:** hyphens are dropped entirely, not converted to underscores.
+> `my.foo-bar` → `MY_FOOBAR`, not `MY_FOO_BAR`.
+> This differs from Spring Boot's relaxed binding where hyphens become underscores.
+> To avoid ambiguity, prefer dot-only property names (e.g., `database.maxPoolSize`).
+
+## Two Mechanisms: Explicit vs Automatic
+
+avaje-config supports two distinct ways to use environment variables.
+
+### 1. Explicit `${ENV_VAR:default}` in YAML (expression evaluation)
+
+Use the `${VAR:default}` syntax inside YAML values. The expression is evaluated at
+load time using the exact variable name you specify:
+
+```yaml
+database:
+  host: ${DATABASE_HOST:localhost}
+  port: ${DATABASE_PORT:5432}
+  password: ${DATABASE_PASSWORD}      # No default. An env var is required
+```
+
+This form:
+- Uses the **exact env var name** you specify
+- Supports **default values** after the colon
+- Supports **compound values** where the env var is part of a larger string:
+
+```yaml
+aws.appconfig:
+  application: ${ENVIRONMENT_NAME:dev}-my-service   # e.g. "prod-my-service"
+```
+
+### 2. Automatic property override (no YAML changes needed)
+
+For **every** property key avaje-config knows about, it automatically checks whether
+a matching environment variable exists (using the `toEnvKey` translation rule above).
+If one is set, it overrides the file-based value. No `${...}` in the YAML is needed.
+
+```yaml
+# application.yaml - no ${...} needed
+database:
+  host: localhost
+  port: 5432
+```
+
+```bash
+# This env var automatically overrides database.host → DATABASE_HOST
+export DATABASE_HOST=prod-db.example.com
+java myapp.jar
+```
+
+```java
+// Still returns "prod-db.example.com" from env var
+String host = Config.get("database.host");
+```
+
+The automatic check also acts as a **fallback for missing keys**. If a key is not
+found in any configuration file, avaje-config will check the translated env var name.
 
 ## Accessing in Code
 
@@ -217,12 +306,42 @@ String dbHost = System.getenv("DATABASE_HOST");
 
 ## Priority Order
 
-Configuration values are resolved in this order (highest to lowest priority):
+There are two different cases to keep clear: initial loading and runtime changes.
 
-1. System properties: `java -Dserver.port=9000`
-2. Environment variables: `export SERVER_PORT=9000`
-3. Configuration file values: `application.yaml`
-4. Defaults in code
+During initial loading, values are resolved in this order (highest to lowest
+priority):
+
+1. System properties matching the configuration key: `java -Dserver.port=9000`
+2. Environment variables using the standard name mapping: `SERVER_PORT=9000`
+3. Explicit builder values such as `Configuration.builder().put(...)`
+4. Loaded configuration files and resources; later sources override earlier sources
+5. Defaults passed to getters in code, such as `Config.getInt("server.port", 8080)`
+
+The environment variable name is derived from the configuration key by replacing
+`.` with `_`, removing `-`, and upper-casing the result. For example,
+`backport.metrics.reporter` maps to `BACKPORT_METRICS_REPORTER`. Hyphens are
+removed rather than converted to underscores, so `my.feature-name` maps to
+`MY_FEATURENAME`.
+
+Runtime changes made through `Config.setProperty(...)`,
+`Configuration.setProperty(...)`, `putAll(...)`, or a dynamic configuration source
+such as AWS AppConfig update the in-memory configuration immediately and win for
+subsequent reads until the value is changed or cleared.
+
+### Builder values vs system properties and environment variables
+
+`Configuration.builder().put(...)` and `load(...)` are useful for explicit test or
+application defaults, but they are still overridden by matching system properties
+and environment variables when the configuration is built.
+
+```java
+var config = Configuration.builder()
+  .put("server.port", "8080")
+  .build();
+```
+
+With `-Dserver.port=9000`, `config.getInt("server.port")` returns `9000`.
+With `SERVER_PORT=9001` and no system property, it returns `9001`.
 
 ## Secrets Management
 
@@ -256,126 +375,100 @@ api:
 
 How to listen for and respond to configuration changes at runtime.
 
-## Adding a Configuration Listener
+## Listening to a Specific Property
 
-Implement `ConfigChangeListener` to be notified of configuration changes:
+Use `Config.onChange()` to register a lambda that fires when a named property changes:
 
 ```java
 import io.avaje.config.Config;
-import io.avaje.config.ConfigChangeListener;
 
-public class MyConfigListener implements ConfigChangeListener {
-  @Override
-  public void onConfigChange(ConfigChangeEvent event) {
-    System.out.println("Configuration changed: " + event.getProperty());
-  }
-}
+// String value listener
+Config.onChange("database.host", newHost -> {
+  System.out.println("Database host changed to: " + newHost);
+  reconnectDatabase(newHost);
+});
+
+// Typed listeners
+Config.onChangeInt("server.port", newPort -> {
+  System.out.println("Port changed to: " + newPort);
+});
+
+Config.onChangeLong("upload.max.bytes", newSize -> {
+  fileService.setMaxSize(newSize);
+});
+
+Config.onChangeBool("features.enabled", isEnabled -> {
+  featureManager.setEnabled(isEnabled);
+});
 ```
 
-Register the listener:
+## Listening to Multiple Properties
+
+Use the bulk `Config.onChange(Consumer<ModificationEvent>, String... keys)` form
+to watch several properties with a single listener:
 
 ```java
-Config.addChangeListener(new MyConfigListener());
+import io.avaje.config.Config;
+import io.avaje.config.ModificationEvent;
+
+Config.onChange(event -> {
+  Set<String> changed = event.modifiedKeys();
+  System.out.println("Config changed. Modified keys: " + changed);
+
+  if (changed.contains("database.host")) {
+    reconnectDatabase(Config.get("database.host"));
+  }
+  if (changed.contains("cache.ttl")) {
+    cacheService.setTtl(Config.getInt("cache.ttl", 300));
+  }
+}, "database.host", "cache.ttl");
 ```
 
-## Listening to Specific Properties
-
-Listen to changes on specific properties:
+Omit the key arguments to listen for **any** configuration change:
 
 ```java
-public class DatabaseConfigListener implements ConfigChangeListener {
-  @Override
-  public void onConfigChange(ConfigChangeEvent event) {
-    String property = event.getProperty();
-    String newValue = event.getNewValue();
-    
-    if (property.equals("database.host")) {
-      System.out.println("Database host changed to: " + newValue);
-      reconnectDatabase(newValue);
-    }
-  }
-  
-  private void reconnectDatabase(String newHost) {
-    // Close existing connection and reconnect
-  }
-}
+Config.onChange(event -> {
+  System.out.println("Any config changed: " + event.modifiedKeys());
+});
 ```
 
-## Practical Examples
-
-### Reload Cache on Configuration Change
-
-```java
-public class CacheConfigListener implements ConfigChangeListener {
-  private final CacheService cacheService;
-  
-  public CacheConfigListener(CacheService cacheService) {
-    this.cacheService = cacheService;
-  }
-  
-  @Override
-  public void onConfigChange(ConfigChangeEvent event) {
-    if (event.getProperty().equals("cache.ttl")) {
-      int newTtl = Integer.parseInt(event.getNewValue());
-      cacheService.setTtl(newTtl);
-      cacheService.clear();
-    }
-  }
-}
-```
-
-### Update Logger Configuration
-
-```java
-public class LoggerConfigListener implements ConfigChangeListener {
-  @Override
-  public void onConfigChange(ConfigChangeEvent event) {
-    if (event.getProperty().equals("logging.level")) {
-      String level = event.getNewValue();
-      LoggerFactory.setLogLevel(level);
-    }
-  }
-}
-```
-
-### Notify Dependents
-
-```java
-public class AppConfigListener implements ConfigChangeListener {
-  private final ApplicationEventBus eventBus;
-  
-  public AppConfigListener(ApplicationEventBus eventBus) {
-    this.eventBus = eventBus;
-  }
-  
-  @Override
-  public void onConfigChange(ConfigChangeEvent event) {
-    ConfigurationChangedEvent evt = 
-      new ConfigurationChangedEvent(event.getProperty(), event.getNewValue());
-    eventBus.publish(evt);
-  }
-}
-```
-
-## Using with Dependency Injection
-
-With Avaje Inject, register the listener in your application setup:
+## Practical Example: Dynamic Feature Flag
 
 ```java
 @Singleton
-public class ApplicationStartup {
-  public ApplicationStartup(ConfigChangeListener listener) {
-    Config.addChangeListener(listener);
+public class FeatureManager {
+  private volatile boolean featureEnabled;
+
+  @Inject
+  public FeatureManager() {
+    this.featureEnabled = Config.getBool("features.new-ui", false);
+
+    Config.onChangeBool("features.new-ui", newValue -> {
+      this.featureEnabled = newValue;
+      System.out.println("Feature toggle updated: " + newValue);
+    });
+  }
+
+  public boolean isEnabled() {
+    return featureEnabled;
   }
 }
+```
+
+## Triggering a Reload
+
+Force an immediate reload of all configuration sources (e.g. for AWS AppConfig):
+
+```java
+Config.asConfiguration().reloadSources();
 ```
 
 ## Important Notes
 
-- Listeners are called **synchronously** - keep processing quick
-- Changes are detected when configuration is reloaded
-- Use for dynamic reconfiguration, not for every request
-- External configuration services can push updates (cloud config)
+- Listeners are called **synchronously**, keeping processing quick
+- Changes are delivered when configuration is reloaded (polling or explicit `reloadSources()`)
+- Use for dynamic reconfiguration (feature flags, pool sizes, log levels)
+- Listeners registered via `Config.onChange()` are held with a strong reference
 
 ## Next Steps
 

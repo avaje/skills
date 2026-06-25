@@ -34,13 +34,25 @@ cache:
   enabled: false
 ```
 
-## Using Test Configuration
+## Test Resource Auto-Loading
 
-Tests automatically use `src/test/resources/application.yaml`:
+avaje-config automatically loads `src/test/resources/application-test.yaml` (or
+`.properties`) when it is present on the classpath. This happens unconditionally, no profile activation (`config.profiles`, `avaje.profiles`, etc.) is needed.
+
+The loading order during tests is:
+
+1. `src/main/resources/application.yaml` — production defaults
+2. `src/test/resources/application-test.yaml` — test overrides (loaded automatically)
+3. System properties / command-line arguments — highest priority
+
+> **Note:** `application-test.yaml` is a special hardcoded filename. It is not the
+> same as activating a `test` profile. Other profile files (e.g., `application-it.yaml`)
+> still require explicit profile activation via `config.profiles=it`.
 
 ```java
 @Test
 public void testConfiguration() {
+  // application-test.yaml values are available automatically
   String dbHost = Config.get("database.host");
   assertEquals("localhost", dbHost);
 }
@@ -60,25 +72,6 @@ public void testWithCustomPort() {
   } finally {
     System.clearProperty("server.port");
   }
-}
-```
-
-## Mocking Configuration
-
-For advanced testing, mock the Config class:
-
-```java
-import static org.mockito.Mockito.*;
-
-@Test
-public void testWithMockedConfig() {
-  // Create spy on real Config
-  Config spy = spy(Config.class);
-  
-  when(spy.get("server.port")).thenReturn("9000");
-  
-  int port = Integer.parseInt(spy.get("server.port"));
-  assertEquals(9000, port);
 }
 ```
 
@@ -169,24 +162,32 @@ public class IntegrationTest {
 
 ## Testing Configuration Changes
 
-Test configuration change listeners:
+Test configuration change listeners using `Config.onChange()`:
 
 ```java
 @Test
 public void testConfigChangeListener() {
-  List<String> changes = new ArrayList<>();
-  
-  Config.addChangeListener(event -> {
-    changes.add(event.getProperty());
-  });
-  
+  List<String> changedKeys = new ArrayList<>();
+
+  Config.onChange(event -> {
+    changedKeys.addAll(event.modifiedKeys());
+  }, "server.port");
+
   System.setProperty("server.port", "9000");
-  
-  // Trigger configuration reload
-  Config.reload();
-  
-  assertTrue(changes.contains("server.port"));
+
+  // Trigger reload of all configuration sources
+  Config.asConfiguration().reloadSources();
+
+  assertTrue(changedKeys.contains("server.port"));
 }
+```
+
+For single-property typed listeners:
+
+```java
+Config.onChangeInt("server.port", newPort -> {
+  System.out.println("Port changed to: " + newPort);
+});
 ```
 
 ## Best Practices
@@ -242,35 +243,38 @@ int port = Config.getInt("server.port", 8080); // Provide default
 **Symptom**: `application-prod.yaml` is not being loaded
 
 **Solution**:
-1. Verify profile is activated: `java -Dconfig.profile=prod myapp.jar`
-2. Check environment variable: `export CONFIG_PROFILE=prod`
+1. Verify profile is activated: `java -Dconfig.profiles=prod myapp.jar`
+2. Check environment variable: `export CONFIG_PROFILES=prod`
 3. Ensure file name matches the profile: `application-PROFILE.yaml`
 4. Verify file is in `src/main/resources/`
 
-Check active profile:
+> **Note:** `application-test.yaml` in `src/test/resources` is loaded automatically
+> and does **not** need profile activation. See [profiles guide](profiles.md) for details.
+
+Check active profiles:
 ```java
-String profile = Config.get("config.profile", "dev");
-System.out.println("Active profile: " + profile);
+String profiles = Config.get("config.profiles", "dev");
+System.out.println("Active profiles: " + profiles);
 ```
 
 ## Listener Not Called
 
-**Symptom**: `ConfigChangeListener` never triggers
+**Symptom**: `Config.onChange()` callback not triggered
 
 **Solution**:
-1. Ensure listener is registered: `Config.addChangeListener(listener)`
+1. Ensure listener is registered before the configuration change occurs
 2. Verify configuration source supports change notifications
-3. Call `Config.reload()` to trigger change detection
+3. Call `Config.asConfiguration().reloadSources()` to trigger change detection
 4. Check that the property actually changed
 
 Debug:
 ```java
-Config.addChangeListener(event -> {
-  System.out.println("Config changed: " + event.getProperty());
+Config.onChange(event -> {
+  System.out.println("Config changed: " + event.modifiedKeys());
 });
 
-// Force reload
-Config.reload();
+// Force reload of all configuration sources
+Config.asConfiguration().reloadSources();
 ```
 
 ## Type Conversion Error

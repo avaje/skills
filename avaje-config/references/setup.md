@@ -54,12 +54,18 @@ public class MyApplication {
 
 ## Configuration Sources
 
-Avaje Config supports multiple configuration sources (in priority order):
+Avaje Config supports multiple configuration sources. During initial loading the
+highest priority values are:
 
 1. System properties: `-Dserver.port=9000`
 2. Environment variables: `SERVER_PORT=9000`
-3. Application properties file: `application.yaml`
-4. Default values in code
+3. Explicit builder values such as `Configuration.builder().put(...)`
+4. Application properties files and resources, with later sources overriding earlier sources
+5. Default values in code
+
+Runtime calls to `Config.setProperty(...)`, `Configuration.setProperty(...)`, or
+dynamic configuration sources update the in-memory configuration immediately for
+subsequent reads.
 
 ## Type-Safe Configuration
 
@@ -545,7 +551,7 @@ public class AppConfig {
   public final int serverPort;
   public final String serverHost;
   public final boolean sslEnabled;
-  
+
   public AppConfig(
     @ConfigProperty(value = "server.port", defValue = "8080") int serverPort,
     @ConfigProperty(value = "server.host", defValue = "localhost") String serverHost,
@@ -585,11 +591,15 @@ database:
 
 ## Overriding Defaults
 
-Defaults can be overridden by:
+Defaults can be overridden during initial loading by:
 
 1. **System properties**: `java -Dserver.port=9000`
 2. **Environment variables**: `export SERVER_PORT=9000`
-3. **Configuration files** for current environment: `application-prod.yaml`
+3. **Explicit builder values**: `Configuration.builder().put("server.port", "9000")`
+4. **Configuration files**: `application.yaml`
+
+After startup, `Config.setProperty(...)`, `Configuration.setProperty(...)`, and
+dynamic configuration sources update the in-memory value used by subsequent reads.
 
 See [Profiles](profiles.md) for loading environment-specific defaults.
 

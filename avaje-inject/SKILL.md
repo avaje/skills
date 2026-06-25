@@ -14,6 +14,9 @@ processing.
 - Compile-time code generation — fast startup, GraalVM native image ready
 - `@Singleton` / `@Component` for beans, `@Factory` + `@Bean` for factory methods
 - Constructor injection preferred, field/method injection supported
+- Use `@Inject` when a bean has multiple constructors
+- `@Bean Optional<T>` conditionally registers `T`; inject `Optional<T>` for optional dependencies
+- Bean creation order follows real dependencies expressed as constructor/factory parameters
 - `@InjectTest` + `@TestScope` for testing
 - Pairs naturally with avaje-config for external configuration
 

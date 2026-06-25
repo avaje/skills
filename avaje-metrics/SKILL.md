@@ -19,6 +19,8 @@ reporters for common observability systems.
 - Optional JVM metrics registration
 - Export paths for OpenTelemetry, Prometheus, StatsD, and Graphite
 - Ebean database metrics integration
+- For OpenTelemetry, register `GlobalOpenTelemetry` once and before libraries such as Ebean initialize
+- Ebean database metrics and `ebean-opentelemetry` transaction spans are separate integrations
 
 ## Task Guides
 
@@ -28,7 +30,7 @@ Load the relevant reference guide for the current task. **Only load what you nee
 |------|-----------|
 | Setup, first metrics, JVM metrics | [setup](references/setup.md) |
 | Timers, `@Timed`, metrics agent configuration | [method-timing](references/method-timing.md) |
-| OpenTelemetry, Prometheus, StatsD, Graphite | [exporters](references/exporters.md) |
+| OpenTelemetry, Prometheus, StatsD, Graphite, AWS Lambda | [exporters](references/exporters.md) |
 | Ebean database metrics | [integrations](references/integrations.md) |
 
 ## Quick Reference

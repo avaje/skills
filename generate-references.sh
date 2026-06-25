@@ -20,9 +20,10 @@ CONFIG_GUIDES="$AVAJE_DIR/avaje-config/docs/guides"
 JSONB_GUIDES="$AVAJE_DIR/avaje-jsonb/docs/guides"
 LOGGER_GUIDES="$AVAJE_DIR/avaje-simple-logger/docs/guides"
 METRICS_GUIDES="$AVAJE_DIR/avaje-metrics/docs/guides"
+OPENAPI_GUIDES="$AVAJE_DIR/avaje-openapi-generators/docs/guides"
 
 # Verify repos exist
-for dir in "$NIMA_GUIDES" "$INJECT_GUIDES" "$CONFIG_GUIDES" "$JSONB_GUIDES" "$LOGGER_GUIDES" "$METRICS_GUIDES"; do
+for dir in "$NIMA_GUIDES" "$INJECT_GUIDES" "$CONFIG_GUIDES" "$JSONB_GUIDES" "$LOGGER_GUIDES" "$METRICS_GUIDES" "$OPENAPI_GUIDES"; do
   if [ ! -d "$dir" ]; then
     echo "Error: guides directory not found at $dir" >&2
     echo "Set AVAJE_DIR to the parent of your avaje repo checkouts:" >&2
@@ -238,6 +239,7 @@ generate_bundle "$METRICS_REFS/method-timing.md" "Method Timing" \
 
 generate_bundle "$METRICS_REFS/exporters.md" "Exporters" \
   "$METRICS_GUIDES" add-open-telemetry-export.md \
+  "$METRICS_GUIDES" add-open-telemetry-lambda.md \
   "$METRICS_GUIDES" add-prometheus-scrape.md \
   "$METRICS_GUIDES" add-statsd-reporting.md \
   "$METRICS_GUIDES" add-graphite-reporting.md
@@ -245,5 +247,35 @@ generate_bundle "$METRICS_REFS/exporters.md" "Exporters" \
 generate_bundle "$METRICS_REFS/integrations.md" "Integrations" \
   "$METRICS_GUIDES" add-ebean-metrics.md
 
+# ──────────────────────────────────────────────
+# avaje-openapi skill
+# ──────────────────────────────────────────────
+OPENAPI_REFS="$SCRIPT_DIR/avaje-openapi/references"
+mkdir -p "$OPENAPI_REFS"
+
 echo ""
-echo "Done. References written to avaje-nima/ avaje-inject/ avaje-config/ avaje-jsonb/ avaje-simple-logger/ avaje-metrics/"
+echo "Generating avaje-openapi skill references ..."
+
+generate_bundle "$OPENAPI_REFS/getting-started.md" "Getting Started" \
+  "$OPENAPI_GUIDES" getting-started.md
+
+generate_bundle "$OPENAPI_REFS/contract-first.md" "Contract First" \
+  "$OPENAPI_GUIDES" contract-first.md
+
+generate_bundle "$OPENAPI_REFS/models.md" "Models" \
+  "$OPENAPI_GUIDES" models.md
+
+generate_bundle "$OPENAPI_REFS/parameters.md" "Parameters" \
+  "$OPENAPI_GUIDES" parameters.md
+
+generate_bundle "$OPENAPI_REFS/type-mapping.md" "Type Mapping" \
+  "$OPENAPI_GUIDES" type-mapping.md
+
+generate_bundle "$OPENAPI_REFS/validation.md" "Validation" \
+  "$OPENAPI_GUIDES" validation.md
+
+generate_bundle "$OPENAPI_REFS/configuration.md" "Configuration" \
+  "$OPENAPI_GUIDES" configuration.md
+
+echo ""
+echo "Done. References written to avaje-nima/ avaje-inject/ avaje-config/ avaje-jsonb/ avaje-simple-logger/ avaje-metrics/ avaje-openapi/"

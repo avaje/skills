@@ -26,7 +26,7 @@ The main decision is **which OpenTelemetry module to use**.
 |---|---|
 | `avaje-metrics-otel` | you want the easiest OTLP-backed setup for avaje metrics and traced timers |
 | `avaje-metrics-otel-producer` | you already own the OpenTelemetry SDK wiring and want collection driven by the SDK reader/exporter |
-| `avaje-metrics-otel-trace` | you only want traced timers / spans and are not exporting avaje metrics via OTEL |
+| `avaje-metrics-otel-trace` | you want traced timers / spans |
 | `avaje-metrics-otel-reporter` | you explicitly want the scheduled reporter path rather than the SDK `MetricProducer` path |
 
 In most new setups, start with **`avaje-metrics-otel`** unless you have a clear reason to
@@ -60,8 +60,7 @@ For a direct Prometheus text endpoint without OpenTelemetry SDK wiring, use
 
 Use this when:
 
-- the goal is spans from `buildTraced()` or `@Timed(span = ON)`
-- avaje metrics are exported some other way, or not exported through OTEL at all
+- the goal is spans from `buildTraced()`, `buildRootTraced()`, or `@Timed(span = Timed.SpanMode.CHILD)` / `ROOT`
 
 ### Scheduled reporter path: `avaje-metrics-otel-reporter`
 
@@ -97,6 +96,9 @@ import java.time.Duration;
 var openTelemetry = MetricsOpenTelemetry.builder()
   .endpoint("http://otel-collector:4317")
   .serviceName("my-service")
+  .deploymentEnvironmentName("production")
+  .resourceAttributes("business.domain=fleet,business.platform=ship")
+  .traceSampleRatio(0.05)
   .meterInterval(Duration.ofSeconds(60))
   .traceInterval(Duration.ofSeconds(10))
   .buildAndRegisterGlobal();
@@ -106,6 +108,136 @@ This is the best default when the application wants both OTEL metrics export and
 timer support with minimal setup code.
 
 When using this we do **NOT** need Step 3 or Step 4.
+
+### Choose gRPC or HTTP/protobuf export
+
+By default, `MetricsOpenTelemetry` uses OTLP gRPC and passes `endpoint(...)`
+directly to the metric and span exporters. The default endpoint is
+`http://localhost:4317`.
+
+For OTLP HTTP/protobuf, select `HTTP_PROTOBUF` and provide the HTTP base endpoint:
+
+```java
+var openTelemetry = MetricsOpenTelemetry.builder()
+  .protocol(MetricsOpenTelemetry.Protocol.HTTP_PROTOBUF)
+  .endpoint("http://otel-collector:4318")
+  .serviceName("my-service")
+  .buildAndRegisterGlobal();
+```
+
+In HTTP/protobuf mode, the builder appends `/v1/metrics` for metric export and
+`/v1/traces` for trace export. If the application needs signal-specific endpoints,
+headers, compression, or timeout configuration, keep using explicit
+`metricExporter(...)` and `spanExporter(...)` instances.
+
+### Register global OpenTelemetry once and early
+
+`buildAndRegisterGlobal()` registers the OpenTelemetry SDK with
+`GlobalOpenTelemetry`. Call it in one place only.
+
+If another library reads `GlobalOpenTelemetry` during startup, create this
+OpenTelemetry instance before that library is initialized. For example,
+`ebean-opentelemetry` resolves its tracer while Ebean databases are configured, so
+the OpenTelemetry bean should be created before Ebean `Database` beans.
+
+With Avaje Inject, model this as a real dependency:
+
+```java
+@Bean
+Database database(OpenTelemetry openTelemetry, Configuration config) {
+  return Database.builder()
+    .name("db")
+    .dataSourceBuilder(dataSource(config))
+    .build();
+}
+```
+
+Do not call `buildAndRegisterGlobal()` from multiple factories or helper classes.
+If the application already owns SDK creation, use `avaje-metrics-otel-producer`
+instead of the convenience global-registration path.
+
+### Resource attributes
+
+For Lambda or other non-Kubernetes deployments, add resource attributes with the builder:
+
+```java
+var openTelemetry = MetricsOpenTelemetry.builder()
+  .serviceName("backport")
+  .deploymentEnvironmentName("production")
+  .serviceNamespace("tracking")
+  .resourceAttributes("business.domain=fleet,business.subdomain=tracking,business.platform=ship")
+  .buildAndRegisterGlobal();
+```
+
+The convenience module also reads:
+
+- system property `otel.resource.attributes`
+- environment variable `OTEL_RESOURCE_ATTRIBUTES`
+
+using the standard comma-separated `key=value,key2=value2` format. The system property wins over
+the environment variable.
+
+The service name can also be supplied using the standard `otel.service.name` system property or
+`OTEL_SERVICE_NAME` environment variable. Explicit builder attributes override configured resource
+attributes, `otel.service.name` / `OTEL_SERVICE_NAME` override `service.name` from resource
+attributes, and `serviceName(...)` overrides all configured service names.
+
+For the full set of OTel SDK environment variables and system properties read by the
+convenience module (endpoint, timeouts, intervals, deployment environment name) see
+[Configure OpenTelemetry environment variables](configure-otel-environment.md).
+
+### Trace sampling
+
+Without explicit sampler configuration, the OpenTelemetry SDK default is
+`parentBased(alwaysOn)`. For an avaje-nima service using `NimaOtelFilter`, requests
+without incoming trace headers create root HTTP SERVER spans, so this default samples
+all of those request traces.
+
+For Kubernetes services, configure a parent-based trace-id ratio:
+
+```java
+var openTelemetry = MetricsOpenTelemetry.builder()
+  .endpoint("http://otel-collector:4317")
+  .serviceName("orders")
+  .deploymentEnvironmentName("production")
+  .traceSampleRatio(0.05)
+  .buildAndRegisterGlobal();
+```
+
+This samples new root request traces at 5% while respecting incoming sampled or
+unsampled parent decisions. Traced timers inside sampled requests are exported as
+child spans; traced timers inside unsampled requests are not.
+
+The same configuration can be supplied using standard OpenTelemetry names:
+
+```bash
+OTEL_TRACES_SAMPLER=parentbased_traceidratio
+OTEL_TRACES_SAMPLER_ARG=0.05
+```
+
+or:
+
+```bash
+java \
+  -Dotel.traces.sampler=parentbased_traceidratio \
+  -Dotel.traces.sampler.arg=0.05 \
+  -jar app.jar
+```
+
+For Lambda-style applications, configure the SDK sampler in the same way:
+
+```java
+var openTelemetry = MetricsOpenTelemetry.builder()
+  .serviceName("orders-lambda")
+  .deploymentEnvironmentName("production")
+  .traceSampleRatio(0.10)
+  .buildAndRegisterGlobal();
+```
+
+This controls sampling when Lambda instrumentation or `@Timed(span = Timed.SpanMode.ROOT)`
+starts a root span. Use `ROOT` on the top-level handler boundary, then use child traced
+timers inside it. `@Timed(span = Timed.SpanMode.CHILD)` and `buildTraced()` remain no-op
+when there is no current recording span.
 
 ---
 
@@ -163,6 +295,9 @@ var timer = Metrics.timerBuilder("app.service.method")
 timer.time(service::run);
 ```
 
+Use `buildRootTraced()` for a top-level boundary that should initiate sampling when no
+recording span is current.
+
 This module does not export avaje metrics to OTEL backends. It only provides the span
 bridge for traced timers.
 
@@ -184,6 +319,10 @@ OpenTelemetry backend or collector.
 ## Notes
 
 - `avaje-metrics-otel` is the best default for new OTLP-backed setups.
+- For **AWS Lambda** (or other freeze-on-exit serverless runtimes) follow
+  [add-open-telemetry-lambda.md](add-open-telemetry-lambda.md) — the
+  `enableWaitIfRunning()` builder option is essential to avoid losing metrics on
+  Lambda freeze.
 - `avaje-metrics-otel-producer` is the right choice when the application already owns the SDK.
 - `avaje-metrics-otel-trace` is trace-only.
 - `avaje-metrics-otel-reporter` is a separate scheduled path and should be used intentionally.
@@ -192,6 +331,338 @@ OpenTelemetry backend or collector.
   - [metrics-otel-producer/README.md](../../metrics-otel-producer/README.md)
   - [metrics-otel-trace/README.md](../../metrics-otel-trace/README.md)
   - [metrics-otel-reporter/README.md](../../metrics-otel-reporter/README.md)
+
+---
+
+## Source: `metrics/add-open-telemetry-lambda.md`
+
+# Guide: Add OpenTelemetry Export — AWS Lambda
+
+## Purpose
+
+This guide provides step-by-step instructions for exporting **avaje-metrics** data
+(and related traces) to OpenTelemetry from an **AWS Lambda** function (or any similar
+"freeze-on-exit" serverless runtime).
+
+When asked to *"export Lambda metrics to OpenTelemetry"*, *"why are my Lambda metrics
+missing in Grafana / Mimir / Tempo"*, or *"add `enableWaitIfRunning()` to a Lambda
+function"*, follow these steps exactly.
+
+This guide is the Lambda-specific companion to
+[add-open-telemetry-export.md](add-open-telemetry-export.md). Read that one first if
+you have not yet decided which OTEL module to use.
+
+---
+
+## Overview
+
+AWS Lambda freezes the worker between invocations. Two consequences matter for
+OpenTelemetry:
+
+1. **Freeze-on-exit cuts in-flight exports mid-flight.** The default
+   `PeriodicMetricReader` and `BatchSpanProcessor` background threads ship telemetry
+   asynchronously. If the runtime suspends while an OTLP HTTP/gRPC export is in
+   progress, the request is interrupted. The export *may* complete on a later thaw,
+   minutes later — or be lost.
+
+2. **Low-traffic Lambdas starve the periodic reader.** A Lambda invoked once a
+   minute spends most of its life frozen. The periodic reader cannot tick on a
+   reliable schedule, so metrics produced inside an invocation may never be exported
+   before the runtime is suspended again.
+
+`avaje-metrics-otel` solves both with a single builder call:
+
+```java
+.enableWaitIfRunning()
+```
+
+This wraps the metric and span exporters to track in-flight exports and provides a
+`TelemetryWaiter` that, at the **end** of an invocation:
+
+1. **Waits** briefly if a scheduled background export is currently in progress, and
+2. **Force-flushes** telemetry that has gone stale (no successful background export
+   within the configured `flushIfStale` window).
+
+In busy environments the periodic reader keeps `lastSuccess` fresh and the stale
+forceFlush is a no-op. In low-traffic environments the stale forceFlush ships data on
+the invocation thread before the runtime is suspended again.
+
+The pattern mirrors the avaje-metrics StatsD `waitIfRunning()` pattern: most
+invocations have zero overhead; only an invocation that overlaps an active export, or
+arrives after a long quiet period, pays a brief synchronous cost.
+
+---
+
+## Step 1 — Add the dependency
+
+```xml
+<dependency>
+  <groupId>io.avaje</groupId>
+  <artifactId>avaje-metrics-otel</artifactId>
+  <version>${version}</version>
+</dependency>
+```
+
+This is the same module as the standard OTEL recipe — Lambda support is built in.
+
+---
+
+## Step 2 — Build the SDK once at handler-class init
+
+Build the `OpenTelemetrySdk` and `TelemetryWaiter` **once** when the Lambda handler
+class is loaded — not per invocation. The Lambda runtime reuses the same handler
+instance across invocations on the same warm worker.
+
+```java
+import io.avaje.metrics.otel.MetricsOpenTelemetry;
+import io.avaje.metrics.otel.TelemetryWaiter;
+import io.opentelemetry.sdk.OpenTelemetrySdk;
+
+import java.time.Duration;
+import java.util.concurrent.TimeUnit;
+
+public class OrdersHandler {
+
+  private static final TelemetryWaiter WAITER;
+
+  static {
+    var result = MetricsOpenTelemetry.builder()
+        .protocol(MetricsOpenTelemetry.Protocol.HTTP_PROTOBUF)
+        .endpoint(System.getenv("OTEL_EXPORTER_OTLP_ENDPOINT"))
+        .serviceName("orders-lambda")
+        .deploymentEnvironmentName(System.getenv("ENV"))
+        .exportTimeout(Duration.ofSeconds(5))
+        .connectTimeout(Duration.ofSeconds(2))
+        .enableWaitIfRunning()
+            .timeout(Duration.ofSeconds(35))
+            // .flushIfStale(Duration.ofSeconds(60))  // optional
+            .buildAndRegisterGlobal();
+
+    WAITER = result.waiter();
+  }
+
+  public Response handle(Request request) {
+    try {
+      return process(request);
+    } finally {
+      WAITER.waitIfRunning();
+    }
+  }
+}
+```
+
+The two critical pieces are:
+
+- `enableWaitIfRunning()` — wraps the exporters and produces the waiter.
+- `WAITER.waitIfRunning()` in a `finally` block — runs at the end of every
+  invocation, blocks briefly only if needed.
+
+If you have multiple Lambda handler classes in the same deployment artifact (e.g. an
+event handler **and** a schedule handler), build the SDK in a shared class so all
+handlers use the same `TelemetryWaiter` instance.
+
+> **Tip:** Most of the per-environment values above (`endpoint`, `deploymentEnvironmentName`,
+> `serviceName`) can be supplied via standard OTel SDK environment variables instead of
+> explicit builder calls. See
+> [Configure OpenTelemetry environment variables](configure-otel-environment.md) — this
+> keeps the handler code identical across environments and the values configurable from
+> CloudFormation / Lambda env vars.
+
+---
+
+## Step 3 — Understand the Lambda-friendly defaults
+
+Calling `enableWaitIfRunning()` switches two defaults to Lambda-friendly values, but
+only when the caller has not already set them explicitly:
+
+| Setting              | Standalone default | Lambda default               | Why |
+|----------------------|--------------------|------------------------------|-----|
+| `meterInterval`      | 60 seconds         | **30 seconds**               | Faster ticks reduce stale-flush frequency in low-traffic envs. |
+| `flushIfStale`       | n/a                | **2 × meterInterval** (60 s) | Forgives one missed tick + jitter; flushes when two or more are missed. |
+| `WaiterBuilder.timeout` | 5 seconds       | 5 seconds (set higher)       | Lambda freezes mid-export are common — recommend **35 s**. |
+| `connectTimeout`     | unset (10 s SDK)   | recommend **2 s**            | Fail fast on networking issues so they don't burn invocation time. |
+| `exportTimeout`      | unset (10 s SDK)   | recommend **5 s**            | Same. |
+
+You can override any of these. Pass `Duration.ZERO` to `flushIfStale(...)` to disable
+the stale forceFlush and use only the in-flight wait behaviour.
+
+### How `flushIfStale` works
+
+The waiter records `lastSuccessAtMillis` whenever a wrapped export completes
+successfully. At the end of `waitIfRunning()`:
+
+1. If `(now - lastSuccess) > flushIfStale` for metrics, call `SdkMeterProvider.forceFlush()`.
+2. If `(now - lastSuccess) > flushIfStale` for spans, call `SdkTracerProvider.forceFlush()`.
+
+`lastSuccess` starts at `0`, so the **first invocation after cold start** always
+triggers a forceFlush — this is intentional, and ships startup metrics promptly.
+
+---
+
+## Step 4 — Wiring with dependency injection
+
+> **⚠ Ordering matters.** The `@Bean` method that returns `TelemetryWaiter` must
+> declare `OpenTelemetry` as a parameter so the DI container invokes
+> `openTelemetry()` first. Without that parameter, the waiter bean may be created
+> before the SDK is built, returning a no-op waiter that silently never flushes.
+
+### Spring
+
+```java
+@Configuration
+public class MetricsConfig {
+
+  @Bean
+  OpenTelemetry openTelemetry() {
+    var result = MetricsOpenTelemetry.builder()
+        .endpoint(System.getenv("OTEL_EXPORTER_OTLP_ENDPOINT"))
+        .protocol(MetricsOpenTelemetry.Protocol.HTTP_PROTOBUF)
+        .serviceName("orders-lambda")
+        .exportTimeout(Duration.ofSeconds(5))
+        .enableWaitIfRunning()
+            .timeout(Duration.ofSeconds(35))
+            .buildAndRegisterGlobal();
+    this.waiter = result.waiter();
+    return result.sdk();
+  }
+
+  @Bean
+  TelemetryWaiter telemetryWaiter(OpenTelemetry openTelemetry) {
+    return waiter;   // captured above; OpenTelemetry param forces this to run after openTelemetry()
+  }
+
+  private TelemetryWaiter waiter;
+}
+```
+
+### avaje-inject
+
+```java
+@Factory
+public class MetricsConfig {
+
+  private TelemetryWaiter waiter;
+
+  @Bean
+  OpenTelemetry openTelemetry() {
+    var result = MetricsOpenTelemetry.builder()
+        .endpoint(Config.getNullable("otel.endpoint"))
+        .protocol(MetricsOpenTelemetry.Protocol.HTTP_PROTOBUF)
+        .serviceName("orders-lambda")
+        .exportTimeout(Duration.ofSeconds(5))
+        .enableWaitIfRunning()
+            .timeout(Config.getInt("otel.waitTimeoutMillis", 35_000), TimeUnit.MILLISECONDS)
+            .buildAndRegisterGlobal();
+    this.waiter = result.waiter();
+    return result.sdk();
+  }
+
+  @Bean
+  TelemetryWaiter telemetryWaiter(OpenTelemetry openTelemetry) {
+    return waiter;   // OpenTelemetry param forces this to run after openTelemetry()
+  }
+}
+```
+
+In the handler:
+
+```java
+public class OrdersLambda {
+
+  private final TelemetryWaiter waiter;
+  // ... other deps
+
+  public Response handle(Request request) {
+    try {
+      return process(request);
+    } finally {
+      waiter.waitIfRunning();
+    }
+  }
+}
+```
+
+When OTEL is disabled (e.g. in a local dev profile that does not configure an
+endpoint), inject `TelemetryWaiter.noop()` instead — the same handler code keeps
+working with zero overhead.
+
+---
+
+## Step 5 — Verify
+
+Enable DEBUG logging on the `io.avaje.metrics.otel` logger (or your application's
+matching package) so you can see the export lifecycle. With `avaje-simple-logger`:
+
+```properties
+log.level.io.avaje.metrics.otel=DEBUG
+```
+
+You should see a sequence like this on a healthy warm invocation:
+
+```
+DEBUG io.avaje.metrics.otel - OTLP metric export starting count:90
+DEBUG io.avaje.metrics.otel - OTLP metric export completed count:90 elapsedMs:219
+```
+
+On the first invocation after cold start (or after a quiet period):
+
+```
+DEBUG io.avaje.metrics.otel - OTLP metric forceFlush triggered (stale)
+DEBUG io.avaje.metrics.otel - OTLP metric forceFlush completed elapsedMs:585
+```
+
+If `waitIfRunning()` had to wait for an in-flight tick:
+
+```
+DEBUG io.avaje.metrics.otel - Waiting up to 35000ms for in-flight OTLP metric export
+```
+
+Failures and timeouts are logged at WARN:
+
+```
+WARN  io.avaje.metrics.otel - OTLP metric export failed count:90 elapsedMs:5001 ...
+WARN  io.avaje.metrics.otel - Timed out waiting 35000ms for OpenTelemetry metric export to complete
+```
+
+---
+
+## Notes
+
+### Diagnostics
+
+- **No metrics in dashboard, no logs about exports**
+  Check the OTEL endpoint is reachable from the Lambda (VPC/security groups). The
+  handler will time out if `exportTimeout` is unset — set it explicitly to a value
+  smaller than the Lambda timeout.
+
+- **`Timed out waiting` lines**
+  Bump `WaiterBuilder.timeout(...)`. 35 seconds is a good starting point for Lambdas
+  configured with a 60-second timeout.
+
+- **Cold-start metrics arrive but warm-invocation metrics are missing**
+  The periodic reader is starved — set or shorten `flushIfStale` (default already
+  60 s with the Lambda preset).
+
+- **Multi-minute completion latencies**
+  Almost always the freeze-on-exit problem. The fix is exactly this guide.
+
+### Cold-start cost
+
+Building `MetricsOpenTelemetry` and the SDK in `static` initializer or DI factory adds
+to cold-start time. Typical cold start cost is in the order of 50-200 ms depending on
+the configured exporters.
+
+### Tradeoffs
+
+- `flushIfStale` adds a synchronous export to the **first invocation after cold
+  start** (because `lastSuccessAtMillis` starts at 0). This is usually desirable —
+  startup metrics ship promptly — but it does add a few hundred ms to the first
+  warm-up invocation. Pass `Duration.ZERO` to disable.
+- `connectTimeout` and `exportTimeout` are passed through to the default OTLP
+  HTTP/gRPC exporters only. They have no effect when a custom exporter is supplied
+  via `metricExporter(...)` or `spanExporter(...)`.
+- `TelemetryWaiter.noop()` is safe to use as a fallback when OTEL is disabled — it
+  performs no waiting and no flushing.
 
 ---
 
