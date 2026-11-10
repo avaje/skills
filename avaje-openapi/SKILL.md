@@ -92,9 +92,11 @@ public class CentralAccessController implements CentralAccessApi { /* @Override 
   that omit the name still require the producing jar be compiled with `-parameters`.
 - **`@Nullable` server routes need avaje-http 3.10+** — JSpecify `@Nullable` is a
   `TYPE_USE` annotation; older avaje-http server generators mismatched the controller
-  `@Override` against the interface method and silently dropped the route (404). Use
-  avaje-http 3.10+, and add an explicit `avaje-http-helidon-generator` processor path
-  if a parent pom (e.g. `avaje-nima`) pins an older version.
+  `@Override` against the interface method and silently dropped the route (404). Either
+  use avaje-http 3.10+ (add an explicit `avaje-http-helidon-generator` processor path
+  if a parent pom like `avaje-nima` pins an older version), or set
+  `nullableAnnotation=NONE` to disable `@Nullable` so a released server generator
+  matches every route.
 - **Exact model match** — to match hand-written records byte-for-byte, combine
   `generateValidationAnnotations=false`, the right `dateTimeType`/`x-java-type`, and
   rely on the `required`-scalar → primitive rule.

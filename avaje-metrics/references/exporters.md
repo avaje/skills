@@ -104,6 +104,19 @@ var openTelemetry = MetricsOpenTelemetry.builder()
   .buildAndRegisterGlobal();
 ```
 
+When metrics need to be collected from more than the Avaje registry, provide a
+`MetricsProvider`. This allows one collection to coordinate Ebean metrics and other reporting
+destinations:
+
+```java
+var openTelemetry = MetricsOpenTelemetry.builder()
+  .metricsProvider(ebeanInsightProvider)
+  .buildAndRegisterGlobal();
+```
+
+The provider is called with cumulative collection mode by the OTEL producer. It takes precedence
+over `registry(...)` when both are configured.
+
 This is the best default when the application wants both OTEL metrics export and traced
 timer support with minimal setup code.
 
@@ -1004,6 +1017,7 @@ Common builder options:
 - `batchSize(...)` tunes the number of tuples per Graphite payload.
 - `timedThresholdMicros(...)` suppresses low-value timer metrics.
 - `excludeDefaultRegistry()` reports only explicitly added registries or suppliers.
+- `metricsProvider(...)` obtains metrics from a `MetricsProvider` using DELTA collection.
 
 ---
 
@@ -1051,6 +1065,21 @@ GraphiteReporter reporter = GraphiteReporter.builder()
 
 Use `registry(MetricSupplier)` when a custom supplier exposes metrics from another
 source.
+
+Use `metricsProvider(...)` when metrics are composed or filtered by a provider:
+
+```java
+GraphiteReporter reporter = GraphiteReporter.builder()
+  .prefix("prod.billing.")
+  .hostname("graphite.example.com")
+  .port(2003)
+  .metricsProvider(metricsProvider)
+  .build();
+```
+
+An explicitly configured provider replaces the default registry collection.
+Providers such as `MetricsProviderCoordinator` can therefore be shared with
+other reporters. The provider is called with `CollectionMode.DELTA`.
 
 ---
 

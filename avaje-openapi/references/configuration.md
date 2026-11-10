@@ -47,7 +47,7 @@ All `avaje-openapi-maven-plugin` configuration options, with defaults.
 | `generateOverloads` | `false` | Emit convenience `default` overloads. See [parameters](parameters.md#overloads). |
 | `overloadPolicy` | `NULLABLE_ONLY` | `EXPLICIT`, `NULLABLE_ONLY`, or `ALL_OPTIONAL`. |
 | `dateTimeType` | `OFFSET_DATE_TIME` | Global type for `format: date-time`: `INSTANT`, `OFFSET_DATE_TIME`, `LOCAL_DATE_TIME`, `ZONED_DATE_TIME`. See [type-mapping](type-mapping.md). |
-| `nullableAnnotation` | `org.jspecify.annotations.Nullable` | Annotation for optional members; blank disables `@Nullable`. |
+| `nullableAnnotation` | `org.jspecify.annotations.Nullable` | Annotation for optional members; `NONE` disables `@Nullable`. |
 | `typeMappings` | *(none)* | Map of schema `format`/`type` to fully-qualified Java type. See [type-mapping](type-mapping.md). |
 | `failOnUnsupported` | `true` | Fail the build when an unsupported OpenAPI feature is encountered. |
 | `cleanOutput` | `true` | Delete previously generated output before regenerating. |

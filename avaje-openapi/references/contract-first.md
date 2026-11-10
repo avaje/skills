@@ -111,6 +111,21 @@ server generator is 3.10 or newer. (The `avaje-nima` parent may pin an older
 `avaje.http.version`; add an explicit `avaje-http-helidon-generator` processor path
 at the desired version to override it.)
 
+#### Alternative: disable `@Nullable` to stay on a released server generator
+
+If you cannot move the server generator to 3.10+ yet, disable `@Nullable` generation
+so the interface and controller signatures match under the older matching logic:
+
+```xml
+<nullableAnnotation>NONE</nullableAnnotation>
+```
+
+The generated parameters then have no `@Nullable` (just
+`@QueryParam("modifiedSince") Instant modifiedSince`), so a released avaje-http server
+generator registers every route. The trade-off is that the generated interface no
+longer documents parameter nullability. `NONE` is used instead of an empty element
+because Maven collapses an empty configuration element to the parameter default.
+
 ## API-only generation (reuse hand-written models)
 
 When adopting contract-first on an existing API whose DTO records are already

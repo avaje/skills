@@ -21,9 +21,10 @@ JSONB_GUIDES="$AVAJE_DIR/avaje-jsonb/docs/guides"
 LOGGER_GUIDES="$AVAJE_DIR/avaje-simple-logger/docs/guides"
 METRICS_GUIDES="$AVAJE_DIR/avaje-metrics/docs/guides"
 OPENAPI_GUIDES="$AVAJE_DIR/avaje-openapi-generators/docs/guides"
+OAUTH2_GUIDES="$AVAJE_DIR/avaje-oauth2/docs/guides"
 
 # Verify repos exist
-for dir in "$NIMA_GUIDES" "$INJECT_GUIDES" "$CONFIG_GUIDES" "$JSONB_GUIDES" "$LOGGER_GUIDES" "$METRICS_GUIDES" "$OPENAPI_GUIDES"; do
+for dir in "$NIMA_GUIDES" "$INJECT_GUIDES" "$CONFIG_GUIDES" "$JSONB_GUIDES" "$LOGGER_GUIDES" "$METRICS_GUIDES" "$OPENAPI_GUIDES" "$OAUTH2_GUIDES"; do
   if [ ! -d "$dir" ]; then
     echo "Error: guides directory not found at $dir" >&2
     echo "Set AVAJE_DIR to the parent of your avaje repo checkouts:" >&2
@@ -122,6 +123,9 @@ generate_bundle "$NIMA_REFS/deployment.md" "Deployment" \
   "$NIMA_GUIDES" native-image.md \
   "$NIMA_GUIDES" deployment.md \
   "$NIMA_GUIDES" troubleshooting.md
+
+generate_bundle "$NIMA_REFS/htmx.md" "HTMX" \
+  "$NIMA_GUIDES" htmx-getting-started.md
 
 # ──────────────────────────────────────────────
 # avaje-inject skill (standalone)
@@ -277,5 +281,32 @@ generate_bundle "$OPENAPI_REFS/validation.md" "Validation" \
 generate_bundle "$OPENAPI_REFS/configuration.md" "Configuration" \
   "$OPENAPI_GUIDES" configuration.md
 
+# ──────────────────────────────────────────────
+# avaje-oauth2 skill
+# ──────────────────────────────────────────────
+OAUTH2_REFS="$SCRIPT_DIR/avaje-oauth2/references"
+mkdir -p "$OAUTH2_REFS"
+
 echo ""
-echo "Done. References written to avaje-nima/ avaje-inject/ avaje-config/ avaje-jsonb/ avaje-simple-logger/ avaje-metrics/ avaje-openapi/"
+echo "Generating avaje-oauth2 skill references ..."
+
+generate_bundle "$OAUTH2_REFS/setup.md" "Setup" \
+  "$OAUTH2_GUIDES" getting-started.md
+
+generate_bundle "$OAUTH2_REFS/oidc-login.md" "OIDC Login Flow" \
+  "$OAUTH2_GUIDES" oidc-login-flow.md
+
+generate_bundle "$OAUTH2_REFS/authorization.md" "Role and Scope Authorization" \
+  "$OAUTH2_GUIDES" role-and-scope-authorization.md
+
+generate_bundle "$OAUTH2_REFS/multi-issuer.md" "Multi-Issuer Migration" \
+  "$OAUTH2_GUIDES" multi-issuer-migration.md
+
+generate_bundle "$OAUTH2_REFS/jwks-tuning.md" "JWKS Tuning" \
+  "$OAUTH2_GUIDES" jwks-tuning.md
+
+generate_bundle "$OAUTH2_REFS/entra-vs-cognito.md" "Entra vs Cognito Claims" \
+  "$OAUTH2_GUIDES" entra-vs-cognito-claims.md
+
+echo ""
+echo "Done. References written to avaje-nima/ avaje-inject/ avaje-config/ avaje-jsonb/ avaje-simple-logger/ avaje-metrics/ avaje-openapi/ avaje-oauth2/"

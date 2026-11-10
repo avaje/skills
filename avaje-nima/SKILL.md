@@ -31,6 +31,7 @@ Load the relevant reference guide for the current task. **Only load what you nee
 | JSON serialisation, custom adapters | [json](references/json.md) |
 | Testing — controllers, DI, config | [testing](references/testing.md) |
 | Docker, native image, deployment | [deployment](references/deployment.md) |
+| Server-rendered HTML with HTMX | [htmx](references/htmx.md) |
 
 ## Quick Reference
 

@@ -67,11 +67,21 @@ List<Pet> listPets(@Nullable @QueryParam("status") PetStatus status);
 JSpecify is already a transitive dependency of `avaje-http-client`. If you only
 depend on `avaje-http-api`, add `org.jspecify:jspecify` to the consuming project.
 Point `nullableAnnotation` at a different annotation (e.g.
-`jakarta.annotation.Nullable`), or set it blank to disable `@Nullable` generation.
+`jakarta.annotation.Nullable`), or set it to `NONE` to disable `@Nullable`
+generation entirely:
+
+```xml
+<nullableAnnotation>NONE</nullableAnnotation>
+```
+
+The `NONE` sentinel (case-insensitive) is used rather than an empty element because
+Maven collapses an empty configuration element to `null` and applies the parameter
+default, so a blank value cannot disable generation.
 
 > JSpecify `@Nullable` is a `TYPE_USE` annotation. For server controllers this
 > interacts with how avaje-http matches an `@Override` back to the interface method —
-> requires avaje-http 3.10+. See [contract-first](contract-first.md).
+> requires avaje-http 3.10+, or set `nullableAnnotation=NONE` to disable it. See
+> [contract-first](contract-first.md).
 
 ## Overloads
 
